@@ -1,0 +1,8 @@
+Запуск по умолчанию (5 философов, parity)
+clj -M -m c5
+
+6 философов, 30 раундов, think=5, eat=3
+clj -M -m c5 --n 6 --rounds 30 --think 5 --eat 3
+
+Попытка создать live-lock (think=0, timeout=300)
+clj -M -m c5 --n 6 --rounds 200 --think 0 --eat 2 --order fixed --timeout 300
