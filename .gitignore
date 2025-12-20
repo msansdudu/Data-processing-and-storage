@@ -3,3 +3,6 @@
 .lsp/
 
 **/.cpcache/
+**/.idea/
+**/.gradle/
+**/build/
