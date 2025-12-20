@@ -11,162 +11,200 @@ import java.nio.file.Path;
 import java.nio.file.Paths;
 import java.util.concurrent.Callable;
 
+/**
+ * Клиент для получения RSA ключей от сервера генерации ключей
+ */
 public class KeyClient implements Callable<Integer> {
 
-    private String host;
-    private int port;
-    private String name;
-    private int delaySeconds = 0;
-    private boolean abort;
-    private Path outDir = Path.of(".");
+    private String serverHost;
+    private int serverPort;
+    private String clientName;
+    private int responseDelaySeconds = 0;
+    private boolean shouldAbortAfterRequest;
+    private Path outputDirectory = Path.of(".");
 
-    private static void printUsage() {
+    private static void displayUsageInstructions() {
         System.out.println("Usage: key-client --host <host> --port <port> --name <name> [--delay <sec>] [--abort] [--out <dir>]");
-        System.out.println("Options:");
-        System.out.println("  -h, --host    Server host or DNS name (required)");
-        System.out.println("  -p, --port    Server TCP port (required)");
-        System.out.println("  -n, --name    Client name (ASCII), terminated by NUL on the wire (required)");
-        System.out.println("  -d, --delay   Delay in seconds before reading the response (default: 0)");
-        System.out.println("  -a, --abort   Abort after sending the name (do not read the response)");
-        System.out.println("  -o, --out     Output directory to save .key and .crt files (default: .)");
+        System.out.println("Command line options:");
+        System.out.println("  -h, --host    Server hostname or IP address (required)");
+        System.out.println("  -p, --port    Server TCP port number (required)");
+        System.out.println("  -n, --name    Client identifier (ASCII string, null-terminated) (required)");
+        System.out.println("  -d, --delay   Pause in seconds before retrieving server response (default: 0)");
+        System.out.println("  -a, --abort   Terminate connection after sending request without waiting for response");
+        System.out.println("  -o, --out     Directory for saving .key and .crt files (default: current directory)");
     }
 
-    private static KeyClient parseArgs(String[] args) {
-        KeyClient c = new KeyClient();
+    private static KeyClient parseCommandLineArguments(String[] args) {
+        KeyClient client = new KeyClient();
         for (int i = 0; i < args.length; i++) {
-            String a = args[i];
-            switch (a) {
+            String currentArg = args[i];
+            switch (currentArg) {
                 case "-h":
                 case "--host":
-                    if (i + 1 >= args.length) { System.err.println("--host requires a value"); printUsage(); System.exit(2); }
-                    c.host = args[++i];
+                    if (i + 1 >= args.length) {
+                        System.err.println("--host requires a parameter value");
+                        displayUsageInstructions();
+                        System.exit(2);
+                    }
+                    client.serverHost = args[++i];
                     break;
                 case "-p":
                 case "--port":
-                    if (i + 1 >= args.length) { System.err.println("--port requires a value"); printUsage(); System.exit(2); }
-                    try { c.port = Integer.parseInt(args[++i]); }
-                    catch (NumberFormatException ex) { System.err.println("--port must be an integer"); System.exit(2); }
+                    if (i + 1 >= args.length) {
+                        System.err.println("--port requires a parameter value");
+                        displayUsageInstructions();
+                        System.exit(2);
+                    }
+                    try {
+                        client.serverPort = Integer.parseInt(args[++i]);
+                    } catch (NumberFormatException ex) {
+                        System.err.println("--port must be a valid integer");
+                        System.exit(2);
+                    }
                     break;
                 case "-n":
                 case "--name":
-                    if (i + 1 >= args.length) { System.err.println("--name requires a value"); printUsage(); System.exit(2); }
-                    c.name = args[++i];
+                    if (i + 1 >= args.length) {
+                        System.err.println("--name requires a parameter value");
+                        displayUsageInstructions();
+                        System.exit(2);
+                    }
+                    client.clientName = args[++i];
                     break;
                 case "-d":
                 case "--delay":
-                    if (i + 1 >= args.length) { System.err.println("--delay requires a value"); printUsage(); System.exit(2); }
-                    try { c.delaySeconds = Integer.parseInt(args[++i]); }
-                    catch (NumberFormatException ex) { System.err.println("--delay must be an integer"); System.exit(2); }
+                    if (i + 1 >= args.length) {
+                        System.err.println("--delay requires a parameter value");
+                        displayUsageInstructions();
+                        System.exit(2);
+                    }
+                    try {
+                        client.responseDelaySeconds = Integer.parseInt(args[++i]);
+                    } catch (NumberFormatException ex) {
+                        System.err.println("--delay must be a valid integer");
+                        System.exit(2);
+                    }
                     break;
                 case "-a":
                 case "--abort":
-                    c.abort = true;
+                    client.shouldAbortAfterRequest = true;
                     break;
                 case "-o":
                 case "--out":
-                    if (i + 1 >= args.length) { System.err.println("--out requires a value"); printUsage(); System.exit(2); }
-                    c.outDir = Paths.get(args[++i]);
+                    if (i + 1 >= args.length) {
+                        System.err.println("--out requires a parameter value");
+                        displayUsageInstructions();
+                        System.exit(2);
+                    }
+                    client.outputDirectory = Paths.get(args[++i]);
                     break;
                 case "-?":
                 case "-help":
                 case "--help":
-                    printUsage();
+                    displayUsageInstructions();
                     System.exit(0);
                     break;
                 default:
-                    System.err.println("Unknown option: " + a);
-                    printUsage();
+                    System.err.println("Unrecognized option: " + currentArg);
+                    displayUsageInstructions();
                     System.exit(2);
             }
         }
-        if (c.host == null || c.port == 0 || c.name == null) {
-            System.err.println("Missing required options");
-            printUsage();
+        if (client.serverHost == null || client.serverPort == 0 || client.clientName == null) {
+            System.err.println("Required parameters are missing");
+            displayUsageInstructions();
             System.exit(2);
         }
-        return c;
+        return client;
     }
 
     @Override
     public Integer call() {
-        System.out.println("[KeyClient] Starting...");
-        System.out.printf("[KeyClient] host=%s port=%d name=%s delay=%ds abort=%s out=%s%n",
-                host, port, name, delaySeconds, abort, outDir.toAbsolutePath());
+        System.out.println("[KeyClient] Initializing client connection...");
+        System.out.printf("[KeyClient] Server: %s:%d, Name: %s, Delay: %ds, Abort: %s, Output: %s%n",
+                serverHost, serverPort, clientName, responseDelaySeconds,
+                shouldAbortAfterRequest, outputDirectory.toAbsolutePath());
 
         try {
-            Files.createDirectories(outDir);
+            Files.createDirectories(outputDirectory);
         } catch (IOException e) {
-            System.err.println("[KeyClient] Failed to create output directory: " + outDir + ": " + e.getMessage());
+            System.err.println("[KeyClient] Unable to create output directory: " + outputDirectory + ": " + e.getMessage());
             return 1;
         }
 
-        try (Socket socket = new Socket(host, port)) {
-            socket.setTcpNoDelay(true);
-            OutputStream os = socket.getOutputStream();
-            InputStream is = socket.getInputStream();
+        try (Socket serverSocket = new Socket(serverHost, serverPort)) {
+            serverSocket.setTcpNoDelay(true);
+            OutputStream outputStream = serverSocket.getOutputStream();
+            InputStream inputStream = serverSocket.getInputStream();
 
-            byte[] nameBytes = name.getBytes(Protocol.NAME_CHARSET);
-            os.write(nameBytes);
-            os.write(Protocol.NAME_TERMINATOR);
-            os.flush();
+            byte[] clientNameBytes = clientName.getBytes(Protocol.NAME_CHARSET);
+            outputStream.write(clientNameBytes);
+            outputStream.write(Protocol.NAME_TERMINATOR);
+            outputStream.flush();
 
-            if (abort) {
-                System.out.println("[KeyClient] Abort requested after sending name. Closing.");
+            if (shouldAbortAfterRequest) {
+                System.out.println("[KeyClient] Terminating connection after request transmission as requested.");
                 return 0;
             }
 
-            if (delaySeconds > 0) {
-                try { Thread.sleep(delaySeconds * 1000L); } catch (InterruptedException ignored) {}
+            if (responseDelaySeconds > 0) {
+                try {
+                    Thread.sleep(responseDelaySeconds * 1000L);
+                } catch (InterruptedException ignored) {}
             }
 
-            int lenKey = readIntBE(is);
-            byte[] keyPem = (lenKey > 0) ? readExact(is, lenKey) : new byte[0];
-            int lenCert = readIntBE(is);
-            byte[] certPem = (lenCert > 0) ? readExact(is, lenCert) : new byte[0];
+            int privateKeyLength = readIntBE(inputStream);
+            byte[] privateKeyPem = (privateKeyLength > 0) ? readExact(inputStream, privateKeyLength) : new byte[0];
+            int certificateLength = readIntBE(inputStream);
+            byte[] certificatePem = (certificateLength > 0) ? readExact(inputStream, certificateLength) : new byte[0];
 
-            if (lenKey == 0 && lenCert == 0) {
-                System.err.println("[KeyClient] Server returned error lengths (0,0)");
+            if (privateKeyLength == 0 && certificateLength == 0) {
+                System.err.println("[KeyClient] Server responded with error indicators (lengths are zero)");
                 return 2;
             }
 
-            Path keyPath = outDir.resolve(name + ".key");
-            Path crtPath = outDir.resolve(name + ".crt");
-            Files.write(keyPath, keyPem);
-            Files.write(crtPath, certPem);
-            System.out.printf("[KeyClient] Saved %s and %s%n", keyPath.toAbsolutePath(), crtPath.toAbsolutePath());
+            Path privateKeyFile = outputDirectory.resolve(clientName + ".key");
+            Path certificateFile = outputDirectory.resolve(clientName + ".crt");
+            Files.write(privateKeyFile, privateKeyPem);
+            Files.write(certificateFile, certificatePem);
+            System.out.printf("[KeyClient] Key files saved: %s and %s%n",
+                           privateKeyFile.toAbsolutePath(), certificateFile.toAbsolutePath());
             return 0;
         } catch (IOException e) {
-            System.err.println("[KeyClient] I/O error: " + e.getMessage());
+            System.err.println("[KeyClient] Network communication error: " + e.getMessage());
             return 1;
         }
     }
 
-    private static int readIntBE(InputStream is) throws IOException {
-        byte[] b = readExact(is, 4);
-        return ((b[0] & 0xFF) << 24) | ((b[1] & 0xFF) << 16) | ((b[2] & 0xFF) << 8) | (b[3] & 0xFF);
-        
+    private static int readIntBE(InputStream inputStream) throws IOException {
+        byte[] buffer = readExact(inputStream, 4);
+        return ((buffer[0] & 0xFF) << 24) | ((buffer[1] & 0xFF) << 16) |
+               ((buffer[2] & 0xFF) << 8) | (buffer[3] & 0xFF);
     }
 
-    private static byte[] readExact(InputStream is, int len) throws IOException {
-        byte[] buf = new byte[len];
-        int off = 0;
-        while (off < len) {
-            int r = is.read(buf, off, len - off);
-            if (r < 0) throw new IOException("Connection closed while reading " + off + "/" + len + " bytes");
-            off += r;
+    private static byte[] readExact(InputStream inputStream, int requiredLength) throws IOException {
+        byte[] buffer = new byte[requiredLength];
+        int bytesRead = 0;
+        while (bytesRead < requiredLength) {
+            int chunkSize = inputStream.read(buffer, bytesRead, requiredLength - bytesRead);
+            if (chunkSize < 0) {
+                throw new IOException("Connection terminated prematurely while reading " +
+                                    bytesRead + "/" + requiredLength + " bytes");
+            }
+            bytesRead += chunkSize;
         }
-        return buf;
+        return buffer;
     }
 
     public static void main(String[] args) {
-        KeyClient client = parseArgs(args);
-        int exit = 0;
+        KeyClient client = parseCommandLineArguments(args);
+        int exitCode = 0;
         try {
-            exit = client.call();
+            exitCode = client.call();
         } catch (Exception e) {
             e.printStackTrace();
-            exit = 1;
+            exitCode = 1;
         }
-        System.exit(exit);
+        System.exit(exitCode);
     }
 }

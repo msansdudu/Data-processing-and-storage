@@ -8,20 +8,35 @@ import java.nio.charset.StandardCharsets;
 import java.security.PrivateKey;
 import java.security.cert.X509Certificate;
 
+/**
+ * Утилиты для конвертации криптографических объектов в формат PEM
+ */
 public class PemUtil {
-    public static byte[] privateKeyToPemBytes(PrivateKey key) throws IOException {
-        StringWriter sw = new StringWriter();
-        try (JcaPEMWriter w = new JcaPEMWriter(sw)) {
-            w.writeObject(key);
+    /**
+     * Конвертирует приватный ключ в PEM формат
+     * @param privateKey приватный ключ для конвертации
+     * @return массив байтов с PEM представлением
+     * @throws IOException при ошибках записи
+     */
+    public static byte[] privateKeyToPemBytes(PrivateKey privateKey) throws IOException {
+        StringWriter stringWriter = new StringWriter();
+        try (JcaPEMWriter pemWriter = new JcaPEMWriter(stringWriter)) {
+            pemWriter.writeObject(privateKey);
         }
-        return sw.toString().getBytes(StandardCharsets.UTF_8);
+        return stringWriter.toString().getBytes(StandardCharsets.UTF_8);
     }
 
-    public static byte[] certificateToPemBytes(X509Certificate cert) throws IOException {
-        StringWriter sw = new StringWriter();
-        try (JcaPEMWriter w = new JcaPEMWriter(sw)) {
-            w.writeObject(cert);
+    /**
+     * Конвертирует сертификат в PEM формат
+     * @param certificate сертификат для конвертации
+     * @return массив байтов с PEM представлением
+     * @throws IOException при ошибках записи
+     */
+    public static byte[] certificateToPemBytes(X509Certificate certificate) throws IOException {
+        StringWriter stringWriter = new StringWriter();
+        try (JcaPEMWriter pemWriter = new JcaPEMWriter(stringWriter)) {
+            pemWriter.writeObject(certificate);
         }
-        return sw.toString().getBytes(StandardCharsets.UTF_8);
+        return stringWriter.toString().getBytes(StandardCharsets.UTF_8);
     }
 }
