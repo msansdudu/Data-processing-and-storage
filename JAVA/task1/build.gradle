@@ -1,0 +1,54 @@
+plugins {
+    id 'java'
+    id 'application'
+}
+
+group = 'ru.nsu.chebotareva'
+version = '1.0-SNAPSHOT'
+
+java {
+    toolchain {
+        languageVersion = JavaLanguageVersion.of(21)
+    }
+}
+
+repositories {
+    mavenCentral()
+}
+
+dependencies {
+    implementation 'org.bouncycastle:bcprov-jdk18on:1.78.1'
+    implementation 'org.bouncycastle:bcpkix-jdk18on:1.78.1'
+    implementation 'info.picocli:picocli:4.7.6'
+    annotationProcessor 'info.picocli:picocli-codegen:4.7.6'
+    
+    testImplementation 'org.junit.jupiter:junit-jupiter:5.10.2'
+}
+
+application {
+    mainClass = 'ru.nsu.chebotareva.client.KeyClient'
+}
+
+tasks.withType(Test).configureEach {
+    useJUnitPlatform()
+}
+
+tasks.register('runServer', JavaExec) {
+    group = 'application'
+    description = 'Запустить сервер генерации ключей'
+    classpath = sourceSets.main.runtimeClasspath
+    mainClass = 'ru.nsu.chebotareva.server.KeyServer'
+    if (project.hasProperty('args')) {
+        args project.property('args').toString().split(' ')
+    }
+}
+
+tasks.register('runClient', JavaExec) {
+    group = 'application'
+    description = 'Запустить клиента'
+    classpath = sourceSets.main.runtimeClasspath
+    mainClass = 'ru.nsu.chebotareva.client.KeyClient'
+    if (project.hasProperty('args')) {
+        args project.property('args').toString().split(' ')
+    }
+}
