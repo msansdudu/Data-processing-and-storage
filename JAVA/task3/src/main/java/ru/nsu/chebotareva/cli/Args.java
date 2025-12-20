@@ -9,14 +9,14 @@ public final class Args {
     public static record Config(URI baseUrl, boolean verbose, int maxConcurrency, int totalTimeoutSec, String outPath) {}
 
     public static void printHelp() {
-        System.out.println("Web Crawler - Usage: java -jar crawler.jar [options]\n" +
-                "Available options:\n" +
-                "  --baseUrl <url>           Server base URL (default: http://localhost:8080)\n" +
-                "  --verbose|-v              Enable detailed output\n" +
-                "  --maxConcurrency <n>      Maximum concurrent HTTP requests (default: 64)\n" +
-                "  --totalTimeoutSec <n>     Total operation timeout in seconds (default: 120)\n" +
-                "  --out <path>              Save results to file instead of console output\n" +
-                "  --help|-h                 Display this help message");
+        System.out.println("Usage: java -jar task3.jar [options]\n" +
+                "Options:\n" +
+                "  --baseUrl <url>   Base server URL (default: http://localhost:8080)\n" +
+                "  --verbose|-v      Verbose logging\n" +
+                "  --maxConcurrency <n>      Max concurrent requests (default: 64)\n" +
+                "  --totalTimeoutSec <n>     Total crawl timeout in seconds (default: 120)\n" +
+                "  --out <path>              Write sorted messages to file instead of stdout\n" +
+                "  --help|-h         Show this help and exit");
     }
 
     private static void die(String msg) {

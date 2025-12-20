@@ -28,104 +28,86 @@ public class AsyncCrawler {
     }
 
     public List<String> crawl(URI baseUrl, boolean verbose, int maxConcurrency, Duration totalTimeout) throws InterruptedException {
-        Set<String> processedPaths = ConcurrentHashMap.newKeySet();
-        ConcurrentLinkedQueue<String> collectedMessages = new ConcurrentLinkedQueue<>();
-        Semaphore requestLimiter = new Semaphore(Math.max(1, maxConcurrency));
-        AtomicInteger activeRequests = new AtomicInteger(0);
-        AtomicBoolean isCancelled = new AtomicBoolean(false);
-        AtomicInteger processedCount = new AtomicInteger(0);
-        Instant timeoutDeadline = Instant.now().plus(totalTimeout);
-        final int maxPaths = 1000; // Ограничение на максимальное количество обрабатываемых путей
+        Set<String> visited = ConcurrentHashMap.newKeySet();
+        ConcurrentLinkedQueue<String> messages = new ConcurrentLinkedQueue<>();
+        Semaphore permits = new Semaphore(Math.max(1, maxConcurrency));
+        AtomicInteger inFlight = new AtomicInteger(0);
+        AtomicBoolean cancelled = new AtomicBoolean(false);
+        Instant deadline = Instant.now().plus(totalTimeout);
 
-        ExecutorService executor = Executors.newThreadPerTaskExecutor(Thread.ofVirtual().factory());
+        ExecutorService exec = Executors.newThreadPerTaskExecutor(Thread.ofVirtual().factory());
         try {
-            processPath(executor, baseUrl, "/", processedPaths, collectedMessages, requestLimiter, activeRequests, processedCount, maxPaths, verbose, timeoutDeadline, isCancelled);
+            submit(exec, baseUrl, "/", visited, messages, permits, inFlight, verbose, deadline, cancelled);
 
             while (true) {
-                if (activeRequests.get() == 0) break;
-                if (processedCount.get() >= maxPaths) {
-                    isCancelled.set(true);
-                    if (verbose) System.err.println("Maximum path limit reached (" + maxPaths + "), stopping remaining requests");
+                if (inFlight.get() == 0) break;
+                if (Instant.now().isAfter(deadline)) {
+                    cancelled.set(true);
+                    if (verbose) System.err.println("Total timeout reached, cancelling remaining tasks");
                     break;
                 }
-                if (Instant.now().isAfter(timeoutDeadline)) {
-                    isCancelled.set(true);
-                    if (verbose) System.err.println("Timeout exceeded, stopping remaining requests");
-                    break;
-                }
-                Thread.sleep(10);
+                Thread.sleep(5);
             }
         } finally {
-            executor.shutdown();
-            executor.awaitTermination(5, TimeUnit.SECONDS);
+            exec.shutdown();
+            exec.awaitTermination(5, TimeUnit.SECONDS);
         }
 
-        ArrayList<String> result = new ArrayList<>(collectedMessages);
-        Collections.sort(result);
-        return result;
+        ArrayList<String> out = new ArrayList<>(messages);
+        Collections.sort(out);
+        return out;
     }
 
-    private void processPath(ExecutorService executor,
-                            URI baseUrl,
-                            String path,
-                            Set<String> processedPaths,
-                            ConcurrentLinkedQueue<String> collectedMessages,
-                            Semaphore requestLimiter,
-                            AtomicInteger activeRequests,
-                            AtomicInteger processedCount,
-                            int maxPaths,
-                            boolean verbose,
-                            Instant timeoutDeadline,
-                            AtomicBoolean isCancelled) {
-        String normalizedPath = normalizePath(path);
-        if (!processedPaths.add(normalizedPath)) return;
-        if (processedCount.incrementAndGet() > maxPaths) return;
-        activeRequests.incrementAndGet();
+    private void submit(ExecutorService exec,
+                        URI baseUrl,
+                        String path,
+                        Set<String> visited,
+                        ConcurrentLinkedQueue<String> messages,
+                        Semaphore permits,
+                        AtomicInteger inFlight,
+                        boolean verbose,
+                        Instant deadline,
+                        AtomicBoolean cancelled) {
+        String norm = normalizePath(path);
+        if (!visited.add(norm)) return;
+        inFlight.incrementAndGet();
 
-        executor.submit(() -> {
+        exec.submit(() -> {
             try {
-                if (isCancelled.get() || Instant.now().isAfter(timeoutDeadline)) return;
-
-                requestLimiter.acquire();
+                if (cancelled.get() || Instant.now().isAfter(deadline)) return;
+                if (!permits.tryAcquire(50, TimeUnit.MILLISECONDS)) {
+                    permits.acquire();
+                }
                 try {
-                    if (isCancelled.get() || Instant.now().isAfter(timeoutDeadline)) return;
-
-                    URI fullUri = baseUrl.resolve(normalizedPath);
-                    if (verbose) System.out.println("Requesting: " + fullUri);
-
-                    HttpRequest request = HttpRequest.newBuilder(fullUri)
+                    if (cancelled.get() || Instant.now().isAfter(deadline)) return;
+                    URI uri = baseUrl.resolve(norm);
+                    if (verbose) System.out.println("GET " + uri);
+                    HttpRequest req = HttpRequest.newBuilder(uri)
                             .GET()
                             .timeout(Duration.ofSeconds(15))
                             .build();
+                    HttpResponse<String> resp = http.send(req, HttpResponse.BodyHandlers.ofString());
+                    if (verbose) System.out.println("<- status=" + resp.statusCode());
+                    if (resp.statusCode() != 200 || resp.body() == null) return;
 
-                    HttpResponse<String> response = http.send(request, HttpResponse.BodyHandlers.ofString());
-                    if (verbose) System.out.println("Response status: " + response.statusCode());
-
-                    if (response.statusCode() == 200 && response.body() != null) {
-                        ResponseDto responseData = mapper.readValue(response.body(), ResponseDto.class);
-
-                        if (responseData.getMessage() != null) {
-                            collectedMessages.add(responseData.getMessage());
-                        }
-
-                        List<String> nextPaths = responseData.getSuccessors();
-                        if (nextPaths != null) {
-                            for (String nextPath : nextPaths) {
-                                if (isCancelled.get() || Instant.now().isAfter(timeoutDeadline)) break;
-                                processPath(executor, baseUrl, nextPath, processedPaths, collectedMessages,
-                                           requestLimiter, activeRequests, processedCount, maxPaths, verbose, timeoutDeadline, isCancelled);
-                            }
+                    ResponseDto dto = mapper.readValue(resp.body(), ResponseDto.class);
+                    if (dto.getMessage() != null) messages.add(dto.getMessage());
+                    List<String> succ = dto.getSuccessors();
+                    if (succ != null) {
+                        for (String s : succ) {
+                            if (cancelled.get() || Instant.now().isAfter(deadline)) break;
+                            submit(exec, baseUrl, s, visited, messages, permits, inFlight, verbose, deadline, cancelled);
                         }
                     }
                 } catch (Exception e) {
-                    if (verbose) System.err.println("Request error: " + e.getMessage());
+                    if (verbose) System.err.println("Error: " + e.getMessage());
                 } finally {
-                    requestLimiter.release();
+                    permits.release();
                 }
             } catch (InterruptedException ie) {
                 Thread.currentThread().interrupt();
             } finally {
-                activeRequests.decrementAndGet();
+                inFlight.decrementAndGet();
             }
         });
     }
