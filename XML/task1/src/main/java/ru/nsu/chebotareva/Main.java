@@ -8,7 +8,7 @@ import java.nio.file.Path;
 
 public class Main {
     public static void main(String[] args) {
-        Path input = Path.of("src/main/resources/people.xml");
+        Path input = Path.of("XML/task1/src/main/resources/people.xml");
         if (!Files.exists(input)) {
             System.err.println("Input XML not found: " + input.toAbsolutePath());
             System.err.println("Place people.xml into src/main/resources/people.xml and run again.");
